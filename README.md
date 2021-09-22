@@ -99,3 +99,26 @@
 - decoding 은 echo -n "bXlzcWw=" | bask64 --decode 이렇게!
 
 109. multi Container PODs
+
+113. Init Containers
+
+120. OS Upgrades
+- pod-eviction-timeout 을 통해 pod 가 죽은지 몇분 지났을때 실제로 죽었다고 인식할지 정할 수 있음 : kube-controller-manager --pod-eviction-timeout=5m0s ...
+- kubectl drain node-01 을 통해 node-01 에 있는 pod 들 다른데로 옮길 수 있음
+- 이후 kubectl uncordon node-01 을 통해 pod 막는거 치우기 (이후 새로운 pod 할당 가능)
+- drain 은 옮겨버리는거지만 kubectl cordon node-02 하면 node-02 에 더이상 못들어 오게도 가능
+- 이 명령어들을 Node upgrade 할때 쓸 수 있다
+
+123. K8s SW Versions
+- 1.10.3 : major.feature,function.bugfix
+
+125. Cluster Upgrade Process
+- kube-apiserver 의 버전이 가장 높고, > controller-manager 와 kube-scheduler 는 그보다 같거나 한개 낮고, > kubelet 과 kube-proxt 는 그보다 같거나 두개까지 낮다. kube-apiserver 보다 다른애들이 높으면 안된다!
+- kubeadm 을 통해 업그레이드 하려고 하면, kubeadm upgrade plan 치면 현재 버전, latest stable version 등등의 정보 나옴
+- apt-get upgrade -y kubeadm=1.12.0-00 -> kubeadm upgrade apply v1.12.0 -> kubectl get nodes (version 그대로인게 보임) -> apt-get upgrade -y kubelet=1.12.0-00 -> systemctl restart kubelet -> kubectl get nodes 하면 이제서야 마스터만 업그레이드 된게 보임
+- 이제 각각의 node 들어가서 drain 해서 pod 옮겨주고, apt-get upgrade -y kubeadm=1.12.0-00 -> apt-get upgrade -y kubelet=1.12.0-00 -> kubeadm upgrade node config --kubeloet-version v1.12.0 -> system restart kubelet 하면 됨. upgrade 끝나면 kubectl undrain 해주기!
+
+-- 여기서부터 134까지는 다시하자... ㅋㅋ
+
+135. Security
+- 
