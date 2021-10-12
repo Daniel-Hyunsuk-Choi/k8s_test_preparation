@@ -121,4 +121,70 @@
 -- 여기서부터 134까지는 다시하자... ㅋㅋ
 
 135. Security
+- api-server 가 중추적인 역할을 하는데, 누가 여기에 접근 가능하고, 각각 접근 가능한 사람들에게 어떤 역할(RBAC)을 줄 지 잘 정하는게 중요!!
+- k8s 에서 user 는 kubectl create user user1 이런거 불가능하지만, **serviceaccount** 는 관리 가능! kubectl craete serviceaccount sa1
+- 모든 user access 는 kube-apiserver 에 의해 관리된다! admin 이 kubectl 을 쓰는거나, 개발자가 curl https://kube-server-ip:6443 이렇게 해서 pod 접근하는거나 모두 api--server을 통한다.
+- kube-apiserver 가 (1) authenticate User 하고 (2) process request 한다
+- authenticate 하는법은 : (1) static pwd file, (2) Static Token File, (3) Certificates, (4) Identity Service 이렇게 4가지 있다.
+- (1) static pwd file: kube-apiserver.service 에다가 --basic-auth-file=user-details.csv 이렇게 넣고, user-details.csv 에다가 pwd|user|user_id 이렇게 넣으면 된다. (restart kubeapiserver 필요)
+- (2) static token file : 위에 방법이랑 같은데, pwd 에다가 encoding 된 token 넣어서 csv 만들면 된다. 그리고, --token-auth-file 이라는 항목을 kube-apiserver.service 에 넣어주면 된다.
+- 위의 두가지 방법은 recommended 방법이 아니고, consider volume mount while providing the auth file in a kubeadm setup
+
+140. TLS
+- user 가 server 로 보낼때 encrypt 해서 data 를 보내서 중간에 해킹안당하도록 도와주는 기능. server 가 decrypt 하기 위해서는 key 가 가야함. ASYMMETRIC ENCRYPTION (private key-public lock pair 로 decrypt 가능)
+- ssh-keygen 하면 id_rsa 랑 id_rsa.pub 생기는데, pub 이 바로 public lock 이다. 이걸 server 에 주고, 서버가 데이터를 암호화해서 나한테 보내면 나는 private key 로 복호화 할 수 있다. (서버에서 cat ~/.ssh/authorized_keys 하면 보인다(단, 복수개 보일 수 있다.))
+- 내가 데이터를 보낼때 나의 private key 로 암호화해서 보내려면 서버는 나의 private key 를 가지고 있어야 복호화가 가능한데 (symmetric), 이렇게 하기 위해 서버가 asymetric 으로 pub key 를 만들어서 나한테 주면 나는, 그 pub key 로 내 private key 를 암호화 해서 넘겨주면 서버는 나의 private key 를 갖고 있게 된다. 그래서 나중에 내가 나의 private key 로 암호화해서 넘겨주면 서버는 나의 private key 로 데이터를 복호화 하게 된다(인증 되서 나인걸 앎)
+- TLS = SSL 인데, SSL 인증서는 client 와 server 간으 ㅣ통신을 제3자가 보증해주는 전자화된 문서. 이것의 사용으로 해커 위험 줄이고, 접속하려는 서버가 맞는지 확인하고, 악의적 변경 방지 가능
+- decrypt 를 위해서는 key 가 필요한데, 양쪽이 같은 key 가지고 있으면, symmetric 이고 다른거 가지고 있으면 asymmetric 
+- symmetric 은 key 값을 보내야 하는데, 해킹당하면 data 보장 안됨
+- pub key 는 대칭키 방식을 보완! A 키로 암호화를 하면 B 키로 복호화 할 수 있고, B 키로 암호화 하면 A 키로 복호화 할 수 있음. 여기서 pub key 는 타인에게 공개. 그래서 서버에서 나한테 정보를 보낼 때, pub key 로 암호화 하면 나는 비밀키로 decrypt 할 수 있음. 공개키로는 암호화는 할 수 있지만, 복호화는 할 수 없다.
+- 공개키를 이용한 인증? 인증이랑 정보를 보낸 사람이 올바른 사람임을 확인하는 것. 이번에는 비공개키로 암호화하고, 공개키를 가지고 있는사람에게 정보 전송. 만약 공개키를 가지고 정보를 복호화에 성공했다면, 그것은 비밀키를 가지고 있는 사람이 보낸 정보라는 사실을 확인(인증)할 수 있게 되는 것! 이것이 인증의 원리. 
+- 인증서의 역할은 client 가 접속한 server 가 client 가 의도한 서버가 맞는지 보장하는 역할. 이 역할을 하는 민간기업들이 있는데 이 기업들을 CA(Certificate Authority) 혹은 RC(Root Certificate) 라고 한다. 
+- 해커가 router 를 돌려서 우리가 자신의 사이트에 접속하게 하고, 자신의 pub 키로 우리의 private 를 암호화해서 달라고 할때 우리가 그걸 피하기 위해 쓰는게 인증서! pub key 와 함께 온 인증서를 보고 제대로 된 서버에서 왔는지 확인!!
+- 인증서는 해커가 만든 웹서버가 제대로 된 서버인지 확인하고, 인증서 부여. 즉 해커는 제대로 된 인증서를 받을 수 없음
+- public key 확장자 : *.crt 나 *.pem
+- private key 확장자 : *.key, *-key.pem
+
+142. TLS in k8s
+- (1) server certificates(priv,pub) / (2) client certificates (priv,pub) / root certificates (symantec 같은)
+- (1) Server Certificates : kube-api Server 는 apiserver.crt(pub), apiserver.key(priv) 가지고 있고, ETCD Server, KUBELET Server 도 마찬가지로 각각의 .crt 와 .key 가지고 있음
+- (2) Client Certificates : kubectl REST API 쓰는 admin. admin.crt 랑 admin.key 있음, KUBE-SCHEDULER 도 client! scheduler.crt, scheduler.key 있음. KUBE-CONTROLLER-MANAGER 도 마찬가지고 KUBE-PROXY 도 마찬가지! 그들 모두 own pub,priv key 있음
+- ![Screenshot](image/cert_flow.png)
+- apiserver-etcd 통신 필요한애나, apiserver-kubelet 통신에 필요한 pub,priv 있음
+- api-server 에 접근하는게 **authentication** 이고, 접근 이후 필요한 자원 조회 같은 권한이 **authorization**. 권한까지 문제가 없으면 admission control.
+- API SERVER 에 접근하는 방법 3가지 (1) x509 Client Certs (2) kubectl (3) SA
+- (1) x509: k8s api server 6443 접근하려면 권한 필요한데, 설치시 kubeconfig 라는 곳에 인증서 내용 있어서 그거 복사해서 user 가 가지고 있으면 접근 가능. kubeconfig 안에 있는 키들 만드는 법 : 최초 발급 기관 개인키 (CA key) 와 클라이언트 개인키 (Client key) 를 가지고 인증서를 만들기 위한 인증 요청서(CSR) 을 만듬. CA csr 로 바로 CA crt 만들고, Client crt 는 CA key+CA crt+Client csr 로 만들어짐. 이 관계 자주 나오니 숙지할것. 그리고 kubectl 은 kubeconfig 를 다 가지고 있어서 api server 에 접근 되는 가능! 만약 kubectl 에 proxy 를 열면 밖에서 거기로 kubectl 접근 가능하고, 밖에서 접근한 사용자는 client key 와 client crt 없어도 kubectl 이 다 가지고 있어서 apiserver 접근 가능
+- --> 마스터 노드의 인증서는 /etc/kubernetes/admin.conf 에 있다.
+- (2) kubectl : 외부서버에서 kubectl 를 설치해서 multi cluster 접근하는 방법은 접근 하려는 clutser 의 kubeconfig 가 나한테 있어야 함. 이 kubeconfig 는 clusters 와 users, 그리고 이 둘을 정하는 contexts가 있음. 그래서 kubectl config user-context context-A 하면 context-A 에 적힌 cluster 로 user 값을 가지고 접근 하게 됨.
+- (3) SA : k8s cluster 에는 api server 가 있고, ns 만들게 되면, default 라는 SA 가 자동으로 만들어짐. 그리고 이 SA 는 secret 이 하나 달려있는데, CA crt 정보와 token 이 있음. 이상태에서 pod 를 만들면, pod 는 SA 에 달린 secret 의 token 값으로 api Server 로 연결. 결국 이 ns 의 SA 에 달린 Secret 안의 token 값을 알면 외부의 user 는 바로 api server 에 접근 가능.
+- k8s 가 자원의 권한을 지원하는 방법중 가장 중요한게 역할기반으로 권한부여하는 **RBAC**!!
+- ** Authentication 잠깐 설명하면**
+- 1. Cert
+- ![Screenshot](image/1crt.png)
+- 1-1. k8s 설치시에 k8s API SErver 가 kubeconfig 라는 파일을 넣게 되는데, 여기에 CA crt(발급기관 개인키), Client crt, Client Key(클라이언트 개인 키) 등이 모두 있다. 만약에 외부의 사용자가 이 kubeconfig 를 복사해서 가지면 외부에서 k8s 에 접근 할 수 있게 된다.
+- 1-2. CA crt 는 외부에 있는 CA key(발급기관 개인키) + CA csr(인증요청서) 로 만들어져서 k8s API Server 의 kubeconfig 안에 들어온 것이다.
+- 1-3. Client crt 는 CA key + CA crt + Client csr 로 만들어 진다. (csr 은 인증요청서 인데, 이건 최초에 자동으로 만들어짐.)
+- 1-4. 이렇게 만들어진 kubeconfig 가 kubectl 안에 들어있기 때문에, k8s API Server 에 접근 가능하다.
+- 1-5. 만약 kubectl 에 proxy 로 외부에서 접근 가능토록 만들어 놓으면, 외부에서 거기로 kubectl 칠 수 있고, 그러면 k8s API server 접근 가능.
+- 2. kubectl
+- 2-1. 외부에 kubectl 깔고, 다른 cluster 에 접근하려면, 외부에 깐 kubectl 에 두 cluster 의 kubeconfig 있어야 한다.
+- 2-2. 각 kubeconfig 안에는 contexts, clusters, users 가 있어야 하고, 알맞은 인증서 들이 있어야 한다. 
+- 2-3. 그러면 외부에서 context 지정으로 원하는 cluster 에 접근 가능하다.
+- ![Screenshot](image/2kubectl.png) 
+- 3. SA
+- 3-1. cluster 에서 ns 를 만들면, 자동으로 default 라는 SA가 만들어짐. (여기는 CA crt 랑 토큰값이 들어있음.) 그리고 secret 이 만들어지는데, SA 가 이 secret 에 연결됨.
+- 3-2. pod 를 만들면 sa 에 연결되고, 파드는 토큰값을 통해 k8s API server 에 연결됨.
+- 3-3. 결국 외부의 사용자도 ns 의 토큰 값만 알면, 해당 ns 에 접근 가능
+- ![Screenshot](image/3sa.png) 
+- ** Authorization 잠깐 설명하면**
+- 1. RBAC (Role, RoleBinding) (role 과 rolebinding 이라는 obj 기반으로 역할 기반으로 권한 부여하는 기능!!)
+- 1-1. ns 만들때 생기는 SA 에 어떻게 권하는을 부여하는지에 따라 ns 만 접근 가능할지, clutser 까지 접근 가능한지 제어 가능
+- 1-2. role 을 read 혹은 write 중 특정 애들만 써서 권한 부여할 수 있고, rolebinding 을 하나의 role 들을 sa 에 묶어주는 역할 (여러개에 묶을 수 있음)
+- 1-3. 만약 clutser 단위 제어하려면 cluster role 과 cluster rolebinding 쓰면 됨.
+- 1-4. 우측 그림처럼 rolebinding 이 clusterrole 에 묶일 수도 있지만, cluster 는 전체 단위로 관리해야 해서, clusterroleBinding 을 쓰는게 더 이상적
+- ![Screenshot](image/4rbac.png) 
+- 
+
+143. TLS in k8s - cert creation
+- easyrsa, openssl 등 있지만, openssl 쓸게
 - 
