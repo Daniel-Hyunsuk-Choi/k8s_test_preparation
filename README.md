@@ -124,6 +124,8 @@
 - api-server 가 중추적인 역할을 하는데, 누가 여기에 접근 가능하고, 각각 접근 가능한 사람들에게 어떤 역할(RBAC)을 줄 지 잘 정하는게 중요!!
 - k8s 에서 user 는 kubectl create user user1 이런거 불가능하지만, **serviceaccount** 는 관리 가능! kubectl craete serviceaccount sa1
 - 모든 user access 는 kube-apiserver 에 의해 관리된다! admin 이 kubectl 을 쓰는거나, 개발자가 curl https://kube-server-ip:6443 이렇게 해서 pod 접근하는거나 모두 api--server을 통한다.
+- Authentication : who can access?
+- Authorization : what can they do? (RBAC (Role Base Access Control))
 - kube-apiserver 가 (1) authenticate User 하고 (2) process request 한다
 - authenticate 하는법은 : (1) static pwd file, (2) Static Token File, (3) Certificates, (4) Identity Service 이렇게 4가지 있다.
 - (1) static pwd file: kube-apiserver.service 에다가 --basic-auth-file=user-details.csv 이렇게 넣고, user-details.csv 에다가 pwd|user|user_id 이렇게 넣으면 된다. (restart kubeapiserver 필요)
@@ -187,4 +189,57 @@
 
 143. TLS in k8s - cert creation
 - easyrsa, openssl 등 있지만, openssl 쓸게
+- 
+
+
+146. KubeConfig
+- 원래 kubectl get pods --server my-kube --client-key admin.key --client-crtificate admin.crt --certificate-authority ca.crt 이렇게 써야하는데, 이 뒤에 있는 것들을 kubeconfig 파일에 넣은 것! 그래서 pod 조회 기능 가능 한것. ($HOME/.kube/config 에 있다)
+- kubeconfig file 은 cluster, context(어떤 user 가 어떤 cluster 쓸지 정함), users(다른 previlege on diff cluster 가짐) 이렇게 3개로 구성!
+- ![Screenshot](image/kubeconfig.png) 
+- kubeconfig 파일은 실제로 아래와 같이 context 에서 연결하고 위 아래로 list 로 구성
+- ![Screenshot](image/kubeconfig2.png) 
+- 위 yaml 의 kind 아래에 current-context 에 현재 쓰는 context 명시할 수도 있고, kubectl config view 하면 보이기도 함
+- kubectl config view --kubeconfig=my-custom 이런식으로 지정해서 볼 수도 있음
+- kubeconfig use-context prod-user@production 이런식으로 해서 바꿀 수도 있다.
+- 아래처럼 kubeconfig 에 base64 로 encoding 된 정보를 직접 넣을 수도 있다.
+- ![Screenshot](image/kubeconfig3.png)
+- kubectl config --kubeconfig=/root/my-kube-config use-context research 이렇게 해서 쓸 config 파일 지정하고, 그안에 context 지정할 수 있음
+149. API groups
+- k8s 에서는 apiserver 를 거의 거친다!
+- core group 에 all core functionalities 가 존재한다. (ex. namespace, pods, nc, events ... )
+- named group api 는 더 organized! --> 새로운 기능들은 이걸 통해 사용 될 것.
+- 아래와 같다.
+- ![Screenshot](image/apis.png)
+- apiserver 에 접근할때 그냥 curl 을 쓰면 crt 정보들 명시줘야 하는데, 만약에 kube-proxy 에 해당 내용들 담아 두면 proxy의 port 를 통해 접근하면 바로 apiserver 사용 할 수 있다.
+- ![Screenshot](image/connect.png)
+150. Authorization
+- 우리가 developer 한테는 delete 안주거나, service account 한테는 get 도 못하게 하거나 하는 기능이 authorization
+- restrict access to client 하는게 authorization
+151. RBAC
+- role obj 로 역할 넣을 수 있다.
+- role 에는 apiGroups / resources / verbs 넣어야 하는데, core groupd 은 apiGroups 를 빈칸으로 하면 된다.
+- 만약 configmap 도 만들게 하려면 아래처럼 role 에 두개 넣으면 된다.
+- kubectl create -f 로 만든 role 을 user 에게 연결하려면 아래 그림의 아래 처럼 rolebinding obj 를 만들어주면 된다. usbject 에 user detail 넣어주고, roleref 는 우리가 만든 role 의 detail 을 넣어주는 곳
+- ![Screenshot](image/rbac.png)
+- kubectl auth can-i create deployment 같이 'auth can-i' command 로 가능 여부를 확인 할 수 있다. kubectl auth can-i create deployment --as dev-user 처럼 dev-user 라는 사람의 권한 여부도 확인 가능하다
+- role 을 특정 pod 만 관리 하도록 줄 수도 있다.
+- ![Screenshot](image/rbac2.png)
+- kubectl describe pod kube-apiserver-controlplane -n kube-system 를 통해서 api-server 의 authorization-mode 확인 가능하다.
+153. Cluster Roles and Role Bindings
+- ![Screenshot](image/clusterrolebinding.png)
+155. Service Account
+- service account 는 used by an application to interact with k8s cluster
+- 예를들면, prometheus 도 service account 써서 k8s 자원 상황 보게 된다.
+- jenkins 도 이거 보고 관리한다.
+- k8s dashboard 도 마찬가지인데, has to be authenticated
+- 만드는 법: kubectl create  serviceaccount dashboard-sa
+- 확인 : kubectl get serviceaccount
+- 이거 만들어지면, token 바로 만들어진다. k describe sa dashboard-sa
+- 순서 : (1) sa obj 만들면, (2) generate token for sa, (3) secret 만들고, (4) stores that token into secret (5) link to sa
+- token 보려면 describe sa 에서 나온 token 이름으로 kubectl describe secret dashboard-sa-token-kbbm 해야함
+- 그리고 api-server로 curl 쓸때 header 에 "Authorization: Bearer {token}" 하면 명령어 쓸 수 있다.
+- 모든 ns 에는 default 라는 sa 가 자동으로 생기고, 이 안에 있는 token 을 통해 외부에서 접근 가능하다.
+- pod 를 만들때 쓰고자 하는 곳의 sa 를 mount 해서 header 에 매번 넣을필요 없게 만들수도 있다. 예시가 dashboard 이다. dashboard 는 만들어질때 describe 해보면 /var/run/secrets/kubernetes.io/serviceaccount from default-token-4alik 이런식으로 자동으로 mount 된다.
+- pod 에 spec>serviceAccountName 이라는 항목 넣어서 만든 sa 지정할 수도 있다.
+157. Image Security
 - 
