@@ -2,6 +2,8 @@
 ## Core Concepts
 25. Pods
 - pod 를 command 로 생성하는 방법? kubectl run podname --image=nginx
+- 생성시 yaml 로 만드는 법 : k run http-go --image=http-go --dry-run -o yaml > http-go.yaml
+- 이미 존재하는 pod 를 yaml 로 뽑으려면 k get pod {podname} -o yaml
 
 ## Scheduling 에서 틀렸던 부분
 51. scheduling 
@@ -12,6 +14,13 @@
 
 54. Labels and Selectors
 - pod 중 특정 label 을 고르는 법 : kubectl get pods -l env=prod,bu=finance 
+- env 가 있는 애만 검색해라 : k get pod --show-labels -l 'env' 
+- env 가 없는 애만 검색해라 : k get pod --show-labels -l '!env'
+- env 가 test 아닌애만 검색해라 : k get pod --show-labels -l 'env!=test'
+- 보기 원하는 label 이 app 이랑 rel 일때 : k get pod -L app,rel
+- 새로운 라벨 추가 : k label pod http-go-v2 test=foo
+- 기존 라벨에 추가 : k label pod http-go-ve test=doo --overwrite
+- 라벨 삭제 : k label pod http-go-v2 test-
 
 
 57. Tains and Tolerations
@@ -69,6 +78,10 @@
 - kubectl logs -f event-pod
 - 만약 여러개의 container 가 pod 에 있으면, kubectl logs -f event-pod container1 이런식으로 써야함
 
+- 디플로이먼트 스케일링 : k edit deploy {deploy name} --replicas={number}
+- deployment history 관리 : k create -f http-go-deploy.yaml --record=true
+- 
+
 92. Rolling Updates and Rollbacks
 - rollout 확인 법 : kubectl rollout status deployment/myapp-deployment
 - recreate 는 replica 를 0 으로했다가 새로운거를 올리는거라 app down 생김
@@ -88,7 +101,7 @@
 - imperative : kubectl create configmap config-name --from-literal=key=value --from-literal .... or kubectl create configmap config-name --from-file=path-to-file
 - declarative : kubectl create -f 이고, config-map.yaml 에는 data: > key:value 로 만들기
 - pod 에서 부를때는 spec > containers > envFrom > - configMapRef > name 이렇게 함
-
+- ![Screenshot](image/configmap.png)
 104. secrets in Application
 - imperative : kubectl create secret generic secret-name --from-literal=key=value 아니면 kubectl create secret generic secret-name --from-file=path-to-file
 - 위처럼 from-literal 을 쓸때는 그냥 encode 안해서 해도 됨
@@ -242,4 +255,113 @@
 - pod 를 만들때 쓰고자 하는 곳의 sa 를 mount 해서 header 에 매번 넣을필요 없게 만들수도 있다. 예시가 dashboard 이다. dashboard 는 만들어질때 describe 해보면 /var/run/secrets/kubernetes.io/serviceaccount from default-token-4alik 이런식으로 자동으로 mount 된다.
 - pod 에 spec>serviceAccountName 이라는 항목 넣어서 만든 sa 지정할 수도 있다.
 157. Image Security
+- private registry 쓰려면, worker node 에서 쓰기 때문에, docker-registry secret 을 만들고, 아래와 같이 pod 안에서 spec>imagePullSecrets 인자로 넘겨야 한다.
+- ![Screenshot](image/imagesecurity.png)
+- kubectl exec ubuntu-sleeper -- whoami 라는 명령어를 통해 ubuntu-sleeper pod 의 실행자 누군지 알 수 있다.
+161. Network policy
+- 한 서버 기준에서 자기한테 들어오면 ingress 고, 나가면 egress!
+- 한 pod 에 다른 pod 에서 못들어오게 하려면? network policy obj 를 써라!
+- 만들어진 network policy obj 를 원하는 pod 에 연결하면 그 pod 에는 'allow ingress traffic from API Pod on Port 3306' 이런식으로 정책을 줄 수 있다. 그러면 matches to specified policy 만 들어올 수 있음
+- link 하는법도 label 과 selector 쓴다.  networkpolicy obj 에 podSelector: matchLabels: {}:{} 이런식으로 하고, pod 에 labels: {}:{} 이런식으로 matching 시켜서 link! (Flannel 은 networkpolicy obj 지원하지 않음. calico, kube-router, weave-net 은 지원)
+- ![Screenshot](image/networkingpolicy.png)
+- 위의 예시에서 ingress 만 쓰면 되는 이유는, ingress 로 들어온 딱 api 에는 결과 보내줄 수 있기 때문!
+- 다만, make calls 를 직접 db 에서 할 수는 없다. return 만 줄 수 있을 뿐!
+167. docker storage
+- 도커가 data 를 file system 에 저장하는 법? 인스톨하면 create folder structure : /var/lib/docker. 여기는 aufs, containers, image, volumes 등이 들어감
+- 도커파일안에 있는 한줄 한줄이 docker layer임! 이렇게 layer 구조로 하면, 새로운 dockerfile 을 통해서 image 만들때 용량 효율적으로 사용 가능(reuse the image that was made previously). 환경은 그대로고 코드만 바꾼 경우는 정말 효율적
+- /var/lib/docker/volumes 안에 data_vol1 이라는 dir 을 만들면, docker run 할때 -v data_vol1:/app/data 이런식으로 해당 dir 이름만 가지고 마운트 할 수 있음 (일반은 complete path 쓰면 됨)
+- --mount 가 요즘꺼고, -v 는 옛날꺼 ㅋㅋ
+- -mount type=bind,source=/data/data_vol1,target=/var/lib/mysql 이렇게 type,source,target 이라고 명시적으로 사용
+- 이런 mount 행동을 담당하는게 storage driver 인데, ubuntu 는 기본적으로 AUFS 쓰고, fedora는 Device Mapper 쓰고, 이외에 ZFS, BTRFS, Overlay, Overlay2 등도 있음 
+168. Volume Driver Plugins in Docker
+- 위에꺼는 storage driver 고, local 안쓰고, aws ebs 같은거 쓸때는 docker run 에 --volume-driver rexrays/ebs 이런식으로 명시해줘야 함
+169. Container Storage Interface(CSI)
+- k8s 가 옛날에는 container runtime 에 docker 만 썼는데, 이제는 rkt, cri-o 같은거도 씀
+- 그래서 CRI(Container Runtime Interface) 도 신경써야 함
+- 유사하게, CNI(Container Networking Interface) 도 weaveNet, flannel, cilium 등 여러개 있음
+- 유사하게 CSI(Container Storage Interface) 도 신경써야 함
+171. volume
+- ![Screenshot](image/volume1.png) 
+- 위의 그림처럼 volumes 에 hostPath 를 정하고, pod 를 띄우면, 어떤 노드에 뜰지 모르기 때문에 데이터가 일관적으로 유지되기 어렵다.
+- ![Screenshot](image/volume2.png) 
+- 하여 위의 그림처럼 volumes 에 hostPath 를 aws 로 수정하면 외부에 있는 aws storage 를 공통적으로 쓸 수 있게 된다.
+- 아래는 pv-pvc 를 사용하는 예제이다. 여기서 중요한 점은, pvc 는 pv 가 어디에 되어있느냐에 따라 pod 와 함께 pv 가 떠있는 곳에 뜬다는 점이다.
+- ![Screenshot](image/volume3.png) 
+- 아래의 예시와 같은 경우, pv 는 k8s-node1 에 /node-v 를 마운팅 하려고 준비하고 있기 때문에 여기 연결되는 pvc 와 pod는 k8s-node1 에 뜨고, 해당 node 의 /node-v 라는 위치를 마운팅 하게 된다.
+- reclaimpolicy 는 아래와 같다.
+- ![Screenshot](image/reclaimpolicy.png) 
+
+
+
+===
+
+000. inflearn2
+- k port-forward http-go 7777:8080 하면 밖의 7777 에 http-go pod 의 8080 을 연결한다.
+- k annotate pod http-go test1234=test1234 하고 k get pod -o yaml 로 확인해보면, annotations 가 metadata 에 들어간걸 확인 가능하다.
+- k get pod --all 하면 모두 가져오고, k delete pod --all 하면 다 지움
+- 
+===
+
+001. POD 중급
+- ![Screenshot](image/lifecycle.png)
+- [1] Phase : Pending
+- (1) conditions Initialized : pod 에 사전 세팅이 필요한 경우 initContainer 라는 초기화 script 를 넣을 수 있고, 이 스크립트가 본 컨테이너보다 먼저 실행되고 성공하면 initialized 가 true 가 됨. 아니면 False
+- (2) conditions PodScheduled : pod 가 어디에 올라갈지 node scheduling 되면 PodScheduled 가 True 가 됨
+- (3) conditions containerReady : 이 다음에 image download 되는데, 위의 두 단계 동안, container 는 waiting 이고, 이유는 containerCreating 임. 다 down 되고, 정상기동 되면
+- [2] Phase : Running
+- 다운까지 되면, Running 이 되는데, 만약 container 가 CrashLoopBackOff 에 걸리면, running 이지만, 내부에 containerReady: False, Ready: False 가 된다. 잘 돌아가면, 둘다 True 로 변경됨
+- [3] Phase : Failed / Succeeded
+- 만약 작업중인 container 가 문제 생기면 failed 고, 혹은 작업 끝나서 terminated 되면 succeeded 가 됨
+- phase pending 중에 failed 로 갈 수도 있고, pending 이나 running 일때 통신 장애 생기면 unknown 갔다가 지속되면 failed 갈 수도 있다.
+- ![Screenshot](image/readinessliveness.png)
+- readiness 필요 경우: 사용자가 서비스에 들어올때 pod 가 재실행 될때 잠깐의 순간에 못들어오게 막으려면 readinessprobe 쓰기
+- pod 가 장애가 났는지 계속 health check 를 하려면 livenessprobe 달아줘야 함
+- 둘은 사용 목적이 다르지, 방법은 같음. httpget, exec, tcpSocket 으로 해당  app 의 상태 확인
+- ![Screenshot](image/readinessliveness2.png)
+- 이 셋중 하나는 꼭 정해야하고, 우측의 설정값은 안넣으면 default 로 됨
+- 아래는 readinessprobe 의 예제이다. /readiness/ready.txt 가 안생기면 준비 완료라고 안보고, 생기면 3회 보고, 성공하면, containerReady 와 Ready 를 True 로 바꾸고, endpoint 도 addresses 인식하면서 서비스에서 연결시킴
+- ![Screenshot](image/readinessliveness3.png)
+- 아래는 livenessprobe 의 예제이다. /health 라는 api 에 계속 명령 날리면서 500 에러를 3번 받으면 문제있다고 인지하고, pod 를 restart 시킨다.
+- ![Screenshot](image/readinessliveness4.png)
+
+002. volume 중급
+- storage class 사용 시 
+- (1) 설치하고, deployment 내에 spec.containers.env 에 DISABLE_SCHEDULER_WEBHOOK 을 TRUE 로 수정해야 함 --> 이걸 안하면, PV 만들때 StorageClassName 에 "" 만 넣으면 pv 못찾고 에러남!
+- (2) 관리 계정을 위한 secret 생성하고, 
+- (3) storageOS 설치
+- (4) 외부에서 접근 가능토록, k edit svc storageos -n storageos 해서 spec 에 externalIPs 와 MasterIP 추가
+- 그럼 아까 만든 secret 안에 id /pw 로 접속 가능
+- (5) default storageclass 추가 (is-default-class:"true" 되어 있는 obj 추가)
+- 그럼 k get storageclasses.storage.k8s.io 로 디폴트 확인 가능
+- 
+
+===
+
+교육 중 
+- container 를 사용하면, os 가 두번 깔리는게 아니라, 컨테이너 내부에서는 host os 의 커널을 사용함. os 가 실제로 깔리는건 아니고, apt, yum 이런걸 쓸 수 있게 해주는 정도임
+- 격리 기술을 위해 chroot 를 사용. chroot 를 쓰면 /root 가 내가 원한 곳으로 설정되고 그 이상 위로 못올라감.
+- 네임스페이스는 커널이 가지고 있는 기능인데, process 에게 os 안에 있는 객체를 구분하기 위한 ns 가 있는데, 대부분은 하나의 ns 를 공유. 시스템의 모든 process를 하나의 ns 를 공유하기 때문에, 다 보임. 우리의 목적은 나누는거라서 ns 사용
+- ns : 동일한 sys 에서 수행되지만, 독립된 공간처럼 격리된 환경을 제공하는 linux kernel 의 경량 프로세스 가상화 기술
+- hypervisor 는 호스트의 HW 자원을 가상화
+- NET ns? NET 은 통신이 목표고, ns 는 격리가 목푠데? -> 각 ns 별로 개별적인 interfase IP 구성을 가짐. 중복 포트 바인딩을 통한 net 충돌 방지
+- 도커를 하면 내부와 로컬의 veth 가 연결되고, 이게 bridge network(docker0) 에 연결되고, 물리 랜카드에 연결 eth0. bridge 왜 있냐고? veth 가 가상일뿐이고, docker 마다 생기는데, 이게 다 물리 랜카드에 1:n 으로 묶일 수 없다.
+- ![Screenshot](image/dockernet.png)
+- 컨테이너는 프로세스일 뿐이다. 가상화되고 격리되어 동작하는 프로세스일 뿐이다.
+- 도커가 생기면 process 가 생긴건데, 그 process 는 chroot /var/lib/docker/overlay2/난수/diff 여기이다. 여기 아래에 컨테이너 내에서 만든 파일들, 디렉토리들 만들어지지만, 휘발성이다.
+- swap 은 당분간 사용하지 않을 메모리에(RAM) 프로세스를 swap(disk) 에 넣어서 잠시 보관하여 ram 효율 높이기 위해 쓰는건데, io 가 생김. 그런데 k8s 는 빠른 연산을 위해 모든 memory 를 다 쓰길 원해서 swap off 해야 함.
+- 그리고, volume mount 하면 /var/lib/docker/volumes/{지정한vol이름}/_data 에 생긴다!
+- 즉, docker run -it -v temp111:/app centos 이렇게 하면, temp111 이라는 폴더가 /var/lib/docker/volumes 아래에 생긴다. 만약에 현재 자신의 위치에 temp111 이 있더라도, 저 위치에 생기고, 만약 현 위치의 temp111 을 mount 하고 싶다면, 절대경로로 써줘야한다.
+- static pod 는 kubelet 이 직접 실행하는 pod, 각각의 노드에서 kubelet 에 의해 실행
+- pod 들을 삭제할 때, apiserver 를 통해서 실행되지 않은 스태틱pod 는 삭제 불가
+- /etc/kubernetes/manifests 아래에 있는 yaml 은 바로 실행됨. 수정해도 바로 반영 됨. 여기가 static pod 의 기본 경로. 여기에 일반 pod 의 yaml 갖다 놓으면 자동으로 뜨고, 지워지지 않음
+- 저 경로는 자동으로 뜬다는 내용은 /var/lib/kubelet/config.yaml 에 staticPodPath 에 적혀있음
+- docker container prune -> 사용하지 않는 모든 컨테이너 삭제
+- docker system df -> 우리의 도커 관련 시스템들이 얼마나 용량을 소모하고 있는지 보여주는 명령어!
+- ![Screenshot](image/dockersysdf.png)
+- Dockerfile 은 IaC(Infrastructure as Code)라고 부름. 원하는 인프라를 코드로 정리해 놓았다는 뜻
+- control-plane = master node = 관제노드 : etcd 라는 명세들이 담긴게 여기 있음
+- kubeadm 을 가지고 클러스터 구성할때 초기에는 고가용성(이중화) 지원하지 않았지만, 이제는 지원함
+- k8s 쓰려면 bridge 모듈을 enable 해야함 (netfilter 라는 kernel engine 이 제어할 수 있도록 해야함 -> modprobe br_netfilter 해서 br_netfilter 가 나와야 함. 그러면 netkernel 이 bridge 를 제어 가능하다는 뜻. )
+- ![Screenshot](image/sysctl.png)
+- GPG : 쿠버는 원래 구글 사내에서 쓰던건데, 공용으로 나온거라서 받을때 pkg 위변조 안됐는지 확인하기 위해 gpg 키 받고, pkg 가져와야 함.
 - 
