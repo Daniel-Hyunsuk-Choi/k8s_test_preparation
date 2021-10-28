@@ -290,9 +290,59 @@
 - 아래의 예시와 같은 경우, pv 는 k8s-node1 에 /node-v 를 마운팅 하려고 준비하고 있기 때문에 여기 연결되는 pvc 와 pod는 k8s-node1 에 뜨고, 해당 node 의 /node-v 라는 위치를 마운팅 하게 된다.
 - reclaimpolicy 는 아래와 같다.
 - ![Screenshot](image/reclaimpolicy.png) 
+183. Switching Routing
+- ![Screenshot](image/switching.png) 
+- ip link 로 host 서버의 네트워크 확인 가능
+- 자신의 ip 를 ip link 에 나온 dev 에 연결하는 명령어 ip addr add ... dev ...
+- 하나의 node 가 있는데, 해당 노드가 한 network 에 묶여 있을때, 같은 network 에 있는 노드와 통신 가능
+- ![Screenshot](image/gateway.png) 
+- 그런데, 다른 network 에 묶여 있는 노드한테 트리거 주려면 router 필요. 
+- router 가 다른 네트워크의 통신을 gateway 를 통해 가능케 해준다. newtork 가 방이라면, gateway 는 문. router 에 ip route add 로 destination(방) via origin(문) 해주면 origin 의 라우터 ip 를 통해서 destination 으로 갈 수 있게 해준다.
+- route 명령어 치면 커널 라우팅 테이블(통신 가능한 애들) 볼 수 있다.
+- 구글처럼 외부에 접속할때도, 구글ip(네트워크) via origin 하면 origin 을 통해서 갈 수 있다. (GW)
+- default 는 0.0.0.0 인데, any network 다 접근 가능하다는 뜻이다. 즉, default via 192.168.2.0 하면 192.168.2.0 으로 바깥세상 다 갈 수 있는거고, 192.168.2.0 via default 하면 어디서든지 192.168.2.0 에 접근 가능하단 뜻.
+- ![Screenshot](image/router.png) 
+- A 에서 C 를 갈때, B 를 경유해야 한다면, ip route add C_Network via A_gateway, 이거랑, ip route add A_Network via C_gateway 이렇게 해준다. 그리고 forward packet allow 해줘야 한다.
+- echo 1 > /proc/sys/net/ipv4/ip_foward 해주면 /etc/sysctl.conf 에 net.ipv4.ip_forward=1 로 바뀌고, 결과 받을 수 있다.
+- ip addr add 한거는 껏다키면 날라가니까 /etc/networks 에 해줄필요 있다.
 
-
-
+184. DNS
+- /etc/hosts 에서 DNS 관리 되는데, 중복 가능하다. 그런데, node 가 많아지면 각각 /etc/hosts 에 가지고 있는게 비효율적이라, DNS 서버를 둔다.
+- 이런 경우 이름이 중복되면 local 의 /etc/hosts 가 우선권을 가진다. 만약 DNS 서버가 우선권 가지게 하려면, /etc/nsswitch.conf 에서 hosts: files dns 이렇게 바꿔주면 된다.
+- dns 서버는 /etc/resolv.conf 에 적혀있는데, local dns 는 보통 192.168.1.100 이다. 구글같은 일반 사이트를 가진 dns 는 8.8.8.8 인데, resolve.conf 가면 8.8.8.8 있다.
+- ![Screenshot](image/domainnames.png) 
+- 도메인 이름 규칙 있는데, 마지막은 commercial 이면 com, network 면 net, education 이면 edu같은 식이다.
+- www 가 있는 subdomain layer 에서 google 의 기능 나눠진다. maps.google 이나 driver.google 처럼
+- ![Screenshot](image/domainnames2.png) 
+- 위처럼, 전체를 차장 가려면, .com dns 가서 구글 dns 가서, app.google.com 의 ip 찾아와야 하는데, 이 과정 반복하지 않고, 캐싱됨
+- ![Screenshot](image/domainnames3.png) 
+- 앞자리 짤라먹고 하고 싶으면 resolve.conf 에 search 로 넣어두기
+186. network ns
+- 하나의 host 에 red 랑 blue 라는 ns 만들면, host 에서 ip link 하면 red 랑 blue 안에 있는 veth 안보이고, 반대로 red 랑 blue 에서도 host 꺼 안보임
+- red 랑 blue 랑 연결하고 싶으면 router 놓는거처럼 해야 함 : ip link add veth-red type veth peer name veth-blue
+- red랑 blue 에 문 놓기 : ip link set veth-red netns red, ip link set veth-blue netns blue
+- 그리고 veth-red 랑 veth blue 랑 연결해야 함 : ip -n red addr add 192.168.15.1 dev veth-red, ip -n blue addr add 192.168.15.2 dev veth-blue
+- 올리기 : ip -n red link set veth-red up, ip -n blue link set veth-blue up
+- 보내기 : ip netns exec red ping 192.168.15.2
+- 여러개 netns 가 생기면 어떻게 다 연결?? bridge 놓기 : ip link add v-net-0 type bridge
+- ip link set dev v-net-0 up
+- 그리고 다 v-net-0 에 연결 
+- (1) 네트워크 만들기: ip link add veth-red type veth peer name veth-red-br
+- (2) 실제 연결 : ip link set veth-red netns red, ip link set veth-red-br master v-net-0
+- (3) 문에 ip 달기 : ip -n red addr add 192.168.15.1 dev veth-red
+- (4) up : ip -n red link set veth-red up
+- host 에서 ping 192.168.15.1 해서 red 로 바로 연결은 안되지만, v-eth-0 통하면 됨. 
+- (5) veth 에 host 연결 가능한 ip 배정 : ip addr add 192.168.15.5/2 dev v-net-0
+- (6) ping 192.168.15.1 성공!
+- host 말고 바깥 세상의 lan 으로 연결하는 법? eth0 통하기
+- (1) ip netns exec blue ip route add 192.168.1.0/24 via 192.168.15.5
+- (2) ip netns exec blue ping 192.168.1.3 하면 보내지긴 하지만 받진 못함
+- (3) iptables 쓰기
+- 바깥 8.8.8.8 이랑 연결하려면?
+- (1) ip nets exec blue ping 8.8.8.8 안됨!
+- (2) ip netns exec blue route 하면 없음
+- (3) ip netns exec blue ip route add default via 192.168.15.5 (내 문)
+- (4) ip nets exec blue ping 8.8.8.8
 ===
 
 000. inflearn2
@@ -364,4 +414,19 @@
 - k8s 쓰려면 bridge 모듈을 enable 해야함 (netfilter 라는 kernel engine 이 제어할 수 있도록 해야함 -> modprobe br_netfilter 해서 br_netfilter 가 나와야 함. 그러면 netkernel 이 bridge 를 제어 가능하다는 뜻. )
 - ![Screenshot](image/sysctl.png)
 - GPG : 쿠버는 원래 구글 사내에서 쓰던건데, 공용으로 나온거라서 받을때 pkg 위변조 안됐는지 확인하기 위해 gpg 키 받고, pkg 가져와야 함.
+- 
+
+=== mock exam
+- k run nginx-pod --image=nginx:alpine
+- k run messaging --image=redis:alpine -l tier=msg
+- k get nodes -o json > /opt...
+- k expose pod messaging --name messaging-service --port 6379 --target-port 6379
+- k describe svc message-service
+- k create deploy hr-web-app --image=kodecloud/webapp-color; k scale deploy hr-web-app --replicas=2
+- k run static-busybox --image=busybox --command sleep 1000 --dry-run-client -o yaml > static.yaml; mv static.yaml /etc/kubernetes/manifests/static.yaml
+- k run finance --image=redis:alpine --dry-run -o yaml > pod.yaml; namespace 추가
+- k get pod orange -o yaml > orange.yaml; vi orange.yaml 해서 typo 고치기
+- k expose deployment hr-web-app --name hr-web-app-service --type NodePort --port 8080 --target-port 8080 --dry-run=client -o yaml > pod.yaml; nodeport: 30082; k craete pod.yaml
+- k get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}' > /opt/outputs/node_os.txt
+- k explain pv --recursive | less 하면 pv 에 대해 알려주고, /hostpath 로 검색해서 인자 알 수 있음
 - 
