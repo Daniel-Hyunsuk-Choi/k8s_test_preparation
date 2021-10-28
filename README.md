@@ -429,4 +429,24 @@
 - k expose deployment hr-web-app --name hr-web-app-service --type NodePort --port 8080 --target-port 8080 --dry-run=client -o yaml > pod.yaml; nodeport: 30082; k craete pod.yaml
 - k get nodes -o jsonpath='{.items[*].status.nodeInfo.osImage}' > /opt/outputs/node_os.txt
 - k explain pv --recursive | less 하면 pv 에 대해 알려주고, /hostpath 로 검색해서 인자 알 수 있음
+- ETCDCTL_API=3 etcdctl version : 버전체크
+- cd /etc/kubernetes/manifests; cat etcd.yaml; ETCD_API=3 ... 이부분 cp
+- 명령어 이용한 저장 : ETCDCTL_API=3 etcdctl --endpoints ... snapshot save /tmp/etcd-backup.db
+- k run nginx-deploy --image-nginx:1.16 --replicas=1 --record
+- k set image deployment/nginx-deploy nginx-deploy=nginx:1.17 --record
+2-6.
+- (0) ls -ltr | tail -2
+- (1) certificate signing request obj 만들기; k create -f john.yaml; k get csr
+- (2) approve : k certificate approve john-developer; k get csr
+- (3) role 만들기 : k create role developer --reousrce=pods --verb=create,list,get,update --namespace=development; k describe role developer -n development
+- (4) role-binding : k create rolebinding developer-role-binding --role=developer --user=john --namespace=development; k -n development describe rolebindings.rbac.authorization.k8s.io developer-role-binding
+- k auth can-i update pods --namespace=development --as=john
+2-7.
+- (1) nginx-resolver 만들기
+- (2) expose : k expose pod nginx-resolver --name=nginx-resolver-service --port=80 --target-port=80 --type=ClusterIP
+- (3) busybox 만들기 & svc test : k run test-nslookup --image=busybox:1.28 --rm -it -- nslookup nginx-resolver-service > /root/nginx.svc; cat /root/nginx.svc
+- (4) busybox 만들기 & pod test : k run test-nslookup --image=busybox:1.28 --rm -it -- nslookup 10-32-0-5.default.pod > /root/nginx.svc; cat /root/nginx.pod; cat /root/nginx.pod
+2-8.
+- ssh node01; systemctl status kubelet 하면 마지막줄에 --config=/var/lib/kubelet/config.yaml 이라고 나옴. 
+- vi ../config.yaml 하면 staticpodpath 라는 인자에 어디에 쓰면 되는지 나옴. 물론, /etc/kubernetes/manifests
 - 
